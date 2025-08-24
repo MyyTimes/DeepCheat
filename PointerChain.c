@@ -71,10 +71,14 @@ void FindPointerChain(FILE *chainFile, HANDLE hProc, uintptr_t targetAddress, ui
 BOOL CollectPointersToTarget(HANDLE hProc, uintptr_t targetAddr)
 {
     MEMORY_BASIC_INFORMATION mbi;
-    BYTE* currentAddress = 0;
-    BYTE* buffer;
-    SIZE_T bytesRead;
-        
+    BYTE *currentAddress = 0;
+    BYTE *buffer;
+    SIZE_T bytesRead, i;
+    uintptr_t ptrValue, ptrAddress, offset, moduleBase; /* pointer addresses*/
+    long long diff; /* target - prtValue */
+    BOOL isDuplicate;
+    int j;
+
     while (VirtualQueryEx(hProc, currentAddress, &mbi, sizeof(mbi)) == sizeof(mbi) && g_pointerCount < MAX_POINTERS_PER_LEVEL) 
     {
         /* Readable region */
@@ -91,20 +95,20 @@ BOOL CollectPointersToTarget(HANDLE hProc, uintptr_t targetAddr)
             
             if (ReadProcessMemory(hProc, mbi.BaseAddress, buffer, mbi.RegionSize, &bytesRead)) 
             {
-                for (SIZE_T i = 0; i + sizeof(uintptr_t) <= bytesRead; i += sizeof(uintptr_t)) 
+                for (i = 0; i + sizeof(uintptr_t) <= bytesRead; i += sizeof(uintptr_t)) 
                 {
-                    uintptr_t ptrValue = *(uintptr_t*)(buffer + i);
+                    ptrValue = *(uintptr_t*)(buffer + i);
                     
                     /* Check if ptrValue points to targetAddr within a reasonable offset (valid iterval) */
-                    long long diff = (long long)targetAddr - (long long)ptrValue;
+                    diff = (long long)targetAddr - (long long)ptrValue;
                     
-                    if (abs(diff) <= MAX_OFFSET && (diff % sizeof(uintptr_t) == 0 || diff == 0)) 
+                    if (abs(diff) <= MAX_OFFSET && diff % sizeof(uintptr_t) == 0) /* diff == 0 */
                     {
-                        uintptr_t offset = (uintptr_t)diff;
-                        uintptr_t ptrAddress = (uintptr_t)((BYTE*)mbi.BaseAddress + i);
+                        offset = (uintptr_t)diff;
+                        ptrAddress = (uintptr_t)((BYTE*)mbi.BaseAddress + i);
                         
-                        BOOL isDuplicate = FALSE;
-                        for (int j = 0; j < g_pointerCount; j++) 
+                        isDuplicate = FALSE;
+                        for (j = 0; j < g_pointerCount; j++) 
                         {
                             if (g_pointers[j].address == ptrAddress) 
                             {
@@ -113,7 +117,8 @@ BOOL CollectPointersToTarget(HANDLE hProc, uintptr_t targetAddr)
                             }
                         }
                         
-                        if (!isDuplicate) {
+                        if (!isDuplicate) 
+                        {
                             /* Save pointer info */
                             g_pointers[g_pointerCount].address = ptrAddress;
                             g_pointers[g_pointerCount].pointedValue = ptrValue;
@@ -121,7 +126,6 @@ BOOL CollectPointersToTarget(HANDLE hProc, uintptr_t targetAddr)
                             g_pointers[g_pointerCount].isStatic = (mbi.Type == MEM_IMAGE);
                             
                             /* Get module info */
-                            uintptr_t moduleBase;
                             if(!GetModuleInfo(hProc, ptrAddress, g_pointers[g_pointerCount].moduleName, &moduleBase)) 
                             {
                                 strcpy(g_pointers[g_pointerCount].moduleName, "Unknown");
@@ -170,13 +174,15 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
     if (pid == 0) return FALSE;
 
     int depth, i, j;
+    PointerChain chain;
+    DWORD_PTR moduleBase;
+    uintptr_t nextTarget;
 
     /* Depth 1 - Start chain (finding static pointers) */
     for(i = 0; i < g_pointerCount && g_chainCount < MAX_CHAINS_TO_SAVE; i++) 
     {
         if(g_pointers[i].isStatic) 
         {
-            PointerChain chain;
             memset(&chain, 0, sizeof(chain)); /* fill with zeros - clean state */
             
             chain.baseAddress = g_pointers[i].address; /* it is chain's base address */
@@ -185,7 +191,7 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
             strcpy(chain.moduleName, g_pointers[i].moduleName);
             
             /* Calculate static offset */
-            DWORD_PTR moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
+            moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
             if(moduleBase != 0) 
                 chain.staticOffset = chain.baseAddress - moduleBase;
             else 
@@ -210,18 +216,17 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
         {
             if(!g_pointers[i].isStatic) continue; 
             
-            PointerChain chain;
             memset(&chain, 0, sizeof(chain)); /* clean state */
             
             chain.baseAddress = g_pointers[i].address;
             chain.offsets[0] = g_pointers[i].offset;
             strcpy(chain.moduleName, g_pointers[i].moduleName);
             
-            DWORD_PTR moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
+            moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
             if (moduleBase != 0)
                 chain.staticOffset = chain.baseAddress - moduleBase;
             
-            uintptr_t nextTarget = g_pointers[i].pointedValue + g_pointers[i].offset;
+            nextTarget = g_pointers[i].pointedValue + g_pointers[i].offset;
             
             if(BuildChainRecursive(hProc, nextTarget, targetAddress, &chain, 1, depth)) 
             {
@@ -232,7 +237,7 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
                     
                     printf("Found valid (depth %d) chain: [%s + 0x%llX]", 
                            depth, chain.moduleName, (unsigned long long)chain.staticOffset);
-                    for (int j = 0; j < depth; j++) {
+                    for (j = 0; j < depth; j++) {
                         printf(" + 0x%llX", (unsigned long long)chain.offsets[j]);
                         if (j < depth - 1) printf(" ->");
                     }
@@ -246,6 +251,10 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
 
 BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalTarget, PointerChain* chain, int currentDepth, int maxDepth)
 {
+    uintptr_t ptrValue, nextTarget;
+    long long diff;
+    int i;
+
     // Hedefi bulduk mu?
     if (currentTarget == finalTarget) {
         chain->depth = currentDepth;
@@ -259,18 +268,18 @@ BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalT
     }
     
     // currentTarget'e point eden pointer'ları ara
-    for (int i = 0; i < g_pointerCount; i++) {
-        uintptr_t ptrValue = g_pointers[i].pointedValue;
+    for (i = 0; i < g_pointerCount; i++) {
+        ptrValue = g_pointers[i].pointedValue;
         
         // Bu pointer currentTarget'e ulaşabiliyor mu?
-        long long diff = (long long)currentTarget - (long long)ptrValue;
+        diff = (long long)currentTarget - (long long)ptrValue;
         
         if (abs(diff) <= MAX_OFFSET && (diff % sizeof(uintptr_t) == 0 || diff == 0)) {
             // Bu pointer'ı chain'e ekle
             chain->offsets[currentDepth] = (uintptr_t)diff;
             
             // Recursive olarak bir sonraki seviyeyi ara
-            uintptr_t nextTarget = ptrValue + chain->offsets[currentDepth];
+            nextTarget = ptrValue + chain->offsets[currentDepth];
             
             if (BuildChainRecursive(hProc, nextTarget, finalTarget, chain, currentDepth + 1, maxDepth)) {
                 return TRUE; // Chain bulundu
@@ -286,14 +295,13 @@ BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalT
 BOOL ValidateChain(HANDLE hProc, PointerChain *chain, uintptr_t expectedTarget)
 {
     uintptr_t currentAddr = chain->baseAddress;
+    uintptr_t value, nextAddress;
     SIZE_T bytesRead;
     
     int i;
 
     for(i = 0; i < chain->depth; i++) 
-    {
-        uintptr_t value;
-        
+    {        
         if(!ReadProcessMemory(hProc, (LPCVOID)currentAddr, &value, sizeof(value), &bytesRead) || bytesRead != sizeof(value)) 
         {
             printf("Failed to read memory at 0x%llX\n", (unsigned long long)currentAddr);
@@ -305,7 +313,7 @@ BOOL ValidateChain(HANDLE hProc, PointerChain *chain, uintptr_t expectedTarget)
                (unsigned long long)chain->offsets[i]);
         
         /* Calculate next address */
-        uintptr_t nextAddress = value + chain->offsets[i];
+        nextAddress = value + chain->offsets[i];
         
         /* If this is the last level, check if we reached the target */
         if(i == chain->depth - 1) 
@@ -326,11 +334,13 @@ BOOL ValidateChain(HANDLE hProc, PointerChain *chain, uintptr_t expectedTarget)
 // Geçerli chain'leri dosyaya kaydet
 void SaveValidChains(FILE *chainFile)
 {
-    fprintf(chainFile, "=== VALID POINTER CHAINS ===\n\n");
+    PointerChain *chain = NULL;
     int i, j;
+
+    fprintf(chainFile, "=== VALID POINTER CHAINS ===\n\n");
     for(i = 0; i < g_chainCount; i++) 
     {
-        PointerChain *chain = &g_validChains[i];
+        chain = &g_validChains[i];
         
         fprintf(chainFile, "Chain %d:\n", i + 1);
         fprintf(chainFile, "Module: %s\n", chain->moduleName);
@@ -372,6 +382,8 @@ void CleanupPointerData()
 /* Get module information for a given address */
 BOOL GetModuleInfo(HANDLE hProc, uintptr_t address, char *moduleName, uintptr_t *moduleBase)
 {
+    uintptr_t modBase, modEnd;
+
     DWORD pid = GetProcessId(hProc);
     if (pid == 0) return FALSE;
     
@@ -385,8 +397,8 @@ BOOL GetModuleInfo(HANDLE hProc, uintptr_t address, char *moduleName, uintptr_t 
     if(Module32First(hSnap, &me32)) 
     {
         do{
-            uintptr_t modBase = (uintptr_t)me32.modBaseAddr;
-            uintptr_t modEnd = modBase + me32.modBaseSize;
+            modBase = (uintptr_t)me32.modBaseAddr;
+            modEnd = modBase + me32.modBaseSize;
             
             if (address >= modBase && address < modEnd) 
             {

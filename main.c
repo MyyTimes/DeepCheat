@@ -8,7 +8,7 @@
 #include "include/PointerChain.h"
 
 #define MAX_DEPTH 4
-#define MAX_FILE_NAME_SIZE 50
+#define MAX_CHAR_SIZE 50
 
 typedef union
 {
@@ -18,11 +18,14 @@ typedef union
 }ScanValue;
 
 void Menu();
-DWORD_PTR GetModuleBaseAddress(DWORD, const char*);
-void SetPID(DWORD *pid);
-HANDLE OpenProcessHandle(DWORD);
-FILE* OpenChainFile(FILE*);
 void ClearBuffer();
+
+void SetModule(DWORD *pid, char[]);
+HANDLE OpenProcessHandle(DWORD);
+DWORD_PTR GetModuleBaseAddress(DWORD, const char*); /* Find base addres using module name */
+
+FILE* OpenChainFile(FILE*);
+
 void ScanForValue(HANDLE, ScanValue, char);
 BOOL InputScanValue(char*, ScanValue*);
 
@@ -40,10 +43,21 @@ void Menu()
     DWORD_PTR moduleBaseAddress = 0;
     HANDLE hProc;
 
-    /* Set PID and process handle*/
+    /* Set module - PID and module name */
     DWORD pid = 0;
-    SetPID(&pid);
+    char moduleName[MAX_CHAR_SIZE] = {0};
+
+    SetModule(&pid, moduleName);
     hProc = OpenProcessHandle(pid);
+
+    /* Variables to scan memory */
+    char type;
+    ScanValue targetValue;
+
+    /* For chain variables and pointers */
+    unsigned long long targetAddress;
+    FILE *chainFile = NULL;
+    uintptr_t chainOffsets[MAX_DEPTH] = {0};
 
     char choice = '0';
     while(choice != 'X')
@@ -57,7 +71,7 @@ void Menu()
         scanf(" %c", &choice);
         ClearBuffer();
 
-        moduleBaseAddress = GetModuleBaseAddress(pid, "crackme.exe");
+        moduleBaseAddress = GetModuleBaseAddress(pid, moduleName);
         
         switch(choice)
         {
@@ -65,39 +79,30 @@ void Menu()
                 printf("Module Base Address: %p\n", (void*)moduleBaseAddress);
                 break;
 
-            case '2': /* Set PID */
-                SetPID(&pid);
+            case '2': /* Set PID and Module Name */
+                SetModule(&pid, moduleName);
                 if(hProc != NULL)
                     CloseHandle(hProc);
                 hProc = OpenProcessHandle(pid);
                 break;
 
             case '3':
-                char type;
-                ScanValue targetValue;
-
                 if(InputScanValue(&type, &targetValue))
                 {
                     ScanForValue(hProc, targetValue, type);
                 }
-
-                //ScanForFloatValue(hProc, targetValue); /* Example target value */
                 break;
 
-            case '4': // Find Pointer Chain - UPDATED VERSION
-                unsigned long long targetAddress;
+            case '4':
                 printf("Enter the target address to find pointer chain: ");
                 scanf(" %llx", &targetAddress);
                 ClearBuffer();
 
-                FILE *chainFile = NULL;
                 chainFile = OpenChainFile(chainFile);
                 if(chainFile == NULL)
                     chainFile = fopen("chains.txt", "w");
 
-                // Yeni gelişmiş pointer chain fonksiyonunu çağır
-                uintptr_t dummy_offsets[MAX_DEPTH] = {0};
-                FindPointerChain(chainFile, hProc, (uintptr_t)targetAddress, dummy_offsets, 1);
+                FindPointerChain(chainFile, hProc, (uintptr_t)targetAddress, chainOffsets, 1);
                 
                 printf("Pointer chains have been written to the file.\n");
                 fclose(chainFile);
@@ -124,10 +129,10 @@ void ClearBuffer()
 
 FILE* OpenChainFile(FILE *chainFile) 
 {
-    char *fileName = (char*)malloc(MAX_FILE_NAME_SIZE * sizeof(char));
+    char *fileName = (char*)malloc(MAX_CHAR_SIZE * sizeof(char));
 
     printf("Enter chain file name: ");
-    fgets(fileName, MAX_FILE_NAME_SIZE, stdin);
+    fgets(fileName, MAX_CHAR_SIZE, stdin);
 
     fileName[strcspn(fileName, "\n")] = '\0'; /* Remove newline character */
     strcat(fileName, ".txt");
@@ -155,20 +160,44 @@ HANDLE OpenProcessHandle(DWORD pid)
     return hProc;
 }
 
-void SetPID(DWORD *pid)
+void SetModule(DWORD *pid, char moduleName[])
 {
-    unsigned long temp;
-    printf("Please enter the PID: ");
+    unsigned long tempPID = 0;
+    char tempName[MAX_CHAR_SIZE] = {0};
+    /*tempName[0] = '\0';*/
 
-    if(scanf(" %lu", &temp) == 1)
+    /* Set PID */
+    while(tempPID == 0)
     {
-        *pid = (DWORD)temp;
-        printf("PID is set: %lu\n", *pid);
-    }
-    else
-    {
-        printf("Invalid PID value!\n");
+        printf("Please enter the PID: ");
+        if(scanf(" %lu", &tempPID) == 1)
+        {
+            *pid = (DWORD)tempPID;
+            printf("> PID is set: %lu\n", *pid);
+        }
+        else
+        {
+            tempPID = 0;
+            printf("Invalid PID!\n");
+        }
         ClearBuffer();
+    }
+
+    /* Set module name */
+    while(tempName[0] == '\0')
+    {
+        printf("Enter module name: ");
+        if(fgets(tempName, sizeof(tempName), stdin) != NULL) 
+        {
+            tempName[strcspn(tempName, "\n")] = 0;
+            strcpy(moduleName, tempName);
+            printf("> Module name is set: %s\n", moduleName);
+        }
+        else 
+        {
+            tempName[0] = '\0';
+            printf("Invalid module name!\n");
+        }
     }
 }
 

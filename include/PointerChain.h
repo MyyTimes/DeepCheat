@@ -9,7 +9,6 @@
 #define MAX_POINTERS_PER_LEVEL 1000
 #define MAX_OFFSET 0x2000  // Maximum reasonable offset
 #define MAX_CHAINS_TO_SAVE 50
-#define MAX_FILE_NAME_SIZE 50
 
 /* To store pointer information */
 typedef struct {
