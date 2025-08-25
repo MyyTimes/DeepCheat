@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdint.h>
+#include "include/DebugTerminal.h"
 #include "include/PointerChain.h"
 
 /* Global pointers for storing data and function prototypes */
@@ -136,7 +137,11 @@ BOOL CollectPointersToTarget(HANDLE hProc, uintptr_t targetAddr)
                             */
 
                             g_pointerCount++;
-                            if(g_pointerCount >= MAX_POINTERS_PER_LEVEL) break;
+                            if(g_pointerCount >= MAX_POINTERS_PER_LEVEL)
+                            {
+                                PrintError("Max pointer count reached!\n");
+                                break;
+                            }
                         }
                     }
                 }
@@ -178,116 +183,87 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
     DWORD_PTR moduleBase;
     uintptr_t nextTarget;
 
-    /* Depth 1 - Start chain (finding static pointers) */
+    // burdan itibaren
     for(i = 0; i < g_pointerCount && g_chainCount < MAX_CHAINS_TO_SAVE; i++) 
     {
-        if(g_pointers[i].isStatic) 
+        if(!g_pointers[i].isStatic) continue;
+
+        memset(&chain, 0, sizeof(chain));
+
+        chain.baseAddress = g_pointers[i].address;
+        chain.offsets[0] = g_pointers[i].offset; 
+        strcpy(chain.moduleName, g_pointers[i].moduleName);
+
+        moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
+        if(moduleBase != 0)
+            chain.staticOffset = chain.baseAddress - moduleBase;
+        
+        nextTarget = g_pointers[i].pointedValue + g_pointers[i].offset;
+
+        if(BuildChainRecursive(hProc, nextTarget, targetAddress, &chain, 1)) 
         {
-            memset(&chain, 0, sizeof(chain)); /* fill with zeros - clean state */
-            
-            chain.baseAddress = g_pointers[i].address; /* it is chain's base address */
-            chain.offsets[0] = g_pointers[i].offset;
-            chain.depth = 1;
-            strcpy(chain.moduleName, g_pointers[i].moduleName);
-            
-            /* Calculate static offset */
-            moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
-            if(moduleBase != 0) 
-                chain.staticOffset = chain.baseAddress - moduleBase;
-            else 
-                chain.staticOffset = 0; /* module not found */
-            
-            /* Validate chain */
             if(ValidateChain(hProc, &chain, targetAddress)) 
             {
                 g_validChains[g_chainCount] = chain;
                 g_chainCount++;
-                printf("Found valid chain: [%s + 0x%llX] + 0x%llX\n", 
-                       chain.moduleName, 
-                       (unsigned long long)chain.staticOffset,
-                       (unsigned long long)chain.offsets[0]);
+                printf("Found valid chain: [%s + 0x%llX]", chain.moduleName, (unsigned long long)chain.staticOffset);
+                for(j = 0; j < chain.depth; j++) 
+                {
+                    printf(" + 0x%llX", (unsigned long long)chain.offsets[j]);
+                    if(j < chain.depth - 1) printf(" ->");
+                }
+                printf("\n");
             }
         }
     }
-    
-    for(depth = 2; depth <= MAX_DEPTH && g_chainCount < MAX_CHAINS_TO_SAVE; depth++) 
-    {        
-        for(i = 0; i < g_pointerCount && g_chainCount < MAX_CHAINS_TO_SAVE; i++) 
-        {
-            if(!g_pointers[i].isStatic) continue; 
-            
-            memset(&chain, 0, sizeof(chain)); /* clean state */
-            
-            chain.baseAddress = g_pointers[i].address;
-            chain.offsets[0] = g_pointers[i].offset;
-            strcpy(chain.moduleName, g_pointers[i].moduleName);
-            
-            moduleBase = GetModuleBaseAddress(pid, chain.moduleName);
-            if (moduleBase != 0)
-                chain.staticOffset = chain.baseAddress - moduleBase;
-            
-            nextTarget = g_pointers[i].pointedValue + g_pointers[i].offset;
-            
-            if(BuildChainRecursive(hProc, nextTarget, targetAddress, &chain, 1, depth)) 
-            {
-                if(ValidateChain(hProc, &chain, targetAddress)) 
-                {
-                    g_validChains[g_chainCount] = chain;
-                    g_chainCount++;
-                    
-                    printf("Found valid (depth %d) chain: [%s + 0x%llX]", 
-                           depth, chain.moduleName, (unsigned long long)chain.staticOffset);
-                    for (j = 0; j < depth; j++) {
-                        printf(" + 0x%llX", (unsigned long long)chain.offsets[j]);
-                        if (j < depth - 1) printf(" ->");
-                    }
-                    printf("\n");
-                }
-            }
-        }
-    } 
+
     return g_chainCount > 0;
+    
 }
 
-BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalTarget, PointerChain* chain, int currentDepth, int maxDepth)
+BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalTarget, PointerChain* chain, int currentDepth)
 {
     uintptr_t ptrValue, nextTarget;
     long long diff;
     int i;
 
-    // Hedefi bulduk mu?
-    if (currentTarget == finalTarget) {
+    /* Reached the target */
+    if (currentTarget == finalTarget) 
+    {
         chain->depth = currentDepth;
         return TRUE;
     }
     
-    // Maximum derinliğe ulaştık mı?
-    if (currentDepth >= maxDepth) {
+    /* Chain length limit */
+    if (currentDepth >= MAX_DEPTH) 
+    {
         printf("Reached max depth without finding target!\n");
         return FALSE;
     }
     
     // currentTarget'e point eden pointer'ları ara
-    for (i = 0; i < g_pointerCount; i++) {
+    for (i = 0; i < g_pointerCount; i++) 
+    {
         ptrValue = g_pointers[i].pointedValue;
         
         // Bu pointer currentTarget'e ulaşabiliyor mu?
         diff = (long long)currentTarget - (long long)ptrValue;
         
-        if (abs(diff) <= MAX_OFFSET && (diff % sizeof(uintptr_t) == 0 || diff == 0)) {
-            // Bu pointer'ı chain'e ekle
-            chain->offsets[currentDepth] = (uintptr_t)diff;
-            
-            // Recursive olarak bir sonraki seviyeyi ara
+        if (abs(diff) <= MAX_OFFSET && diff % sizeof(uintptr_t) == 0) 
+        {
+            chain->offsets[currentDepth] = (uintptr_t)diff; /* add to chain */
+
+            //nextTarget = g_pointers[i].address;  
             nextTarget = ptrValue + chain->offsets[currentDepth];
-            
-            if (BuildChainRecursive(hProc, nextTarget, finalTarget, chain, currentDepth + 1, maxDepth)) {
-                return TRUE; // Chain bulundu
+
+            if(BuildChainRecursive(hProc, nextTarget, finalTarget, chain, currentDepth + 1)) 
+            {
+                return TRUE; /* chain found */
             }
         }
     }
     
-    return FALSE; // Bu branch'te chain bulunamadı
+    return FALSE; /* chain not found */
 }
 
 /* PHASE 4 */

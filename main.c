@@ -7,7 +7,6 @@
 #include <stdint.h> /* uintptr_t */
 #include "include/PointerChain.h"
 
-#define MAX_DEPTH 4
 #define MAX_CHAR_SIZE 50
 
 typedef union
