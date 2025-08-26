@@ -1,6 +1,8 @@
 #ifndef DEBUG_TERMINAL_H
 #define DEBUG_TERMINAL_H
 
+#include <stdarg.h> /* va_list */
+
 #define RESET   "\033[0m" 
 #define RED     "\033[31m"
 #define GREEN   "\033[32m"
@@ -21,6 +23,7 @@
 
 #define BackGround "\033[48;5;236m"
 
-void PrintError(const char *);
+void PrintError(const char*, ...);
+void PrintInfo(const char*, ...);
 
 #endif // DEBUG_TERMINAL_H
