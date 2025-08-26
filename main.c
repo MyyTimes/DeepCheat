@@ -6,6 +6,7 @@
 #include <math.h> /* [fabs()]: Use fabs to compare floating-point values - epsilon tolerance */
 #include <stdint.h> /* uintptr_t */
 #include "include/PointerChain.h"
+#include "include/MemoryRagion.h"
 
 #define MAX_CHAR_SIZE 64
 
@@ -65,7 +66,7 @@ void Menu()
         printf("\n------------------\n");
         printf("Current PID: %lu\n", pid);
         printf("------------------\n");
-        printf("1. Get module base address\n2. Set PID\n3. Scan for value\n4. Find pointer chain\nX. Exit\n");
+        printf("1. Get module base address\n2. Set PID\n3. Scan for value\n4. Find pointer chain\n5. Show memory Regions\nX. Exit\n");
         printf("Please select an option: ");
         
         scanf(" %c", &choice);
@@ -100,11 +101,15 @@ void Menu()
 
                 chainFile = OpenChainFile(chainFile);
                 if(chainFile == NULL)
-                    chainFile = fopen("chains.txt", "w");
+                    chainFile = fopen("Pointers/chains.txt", "w");
 
                 FindPointerChain(chainFile, hProc, (uintptr_t)targetAddress, chainOffsets, 1);
                 printf("Pointer chains have been written to the file.\n");
                 fclose(chainFile);
+                break;
+            
+            case '5': /* Save memory regions to text file */
+                ShowMemoryRegions(hProc);    
                 break;
 
             case 'X': /* EXIT */
@@ -128,13 +133,14 @@ void ClearBuffer()
 
 FILE* OpenChainFile(FILE *chainFile) 
 {
-    char *fileName = (char*)malloc(MAX_CHAR_SIZE * sizeof(char));
+    char *fileName = (char*)calloc(MAX_CHAR_SIZE, sizeof(char));
+    strcat(fileName, "Pointers/"); /* folder name */
 
     printf("Enter chain file name: ");
-    fgets(fileName, MAX_CHAR_SIZE, stdin);
+    fgets(&fileName[9], MAX_CHAR_SIZE, stdin);
 
     fileName[strcspn(fileName, "\n")] = '\0'; /* Remove newline character */
-    strcat(fileName, ".txt");
+    strcat(fileName, ".txt"); /* file type */
 
     chainFile = fopen(fileName, "w");
     if (!chainFile) 

@@ -1,8 +1,11 @@
 #ifndef POINTER_CHAIN_H
 #define POINTER_CHAIN_H
 
-#include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <windows.h>
+#include <tlhelp32.h>
 #include <stdint.h>
 
 #define MAX_DEPTH 7

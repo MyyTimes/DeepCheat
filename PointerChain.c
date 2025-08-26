@@ -1,11 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <stdint.h>
-#include "include/DebugTerminal.h"
 #include "include/PointerChain.h"
+#include "include/DebugTerminal.h"
 
 /* Global pointers for storing data and function prototypes */
 static PointerInfo *foundPointers = NULL;
@@ -85,7 +79,8 @@ BOOL CollectPointersToTarget(HANDLE hProc, uintptr_t targetAddr)
         /* Readable region */
         if(mbi.State == MEM_COMMIT && 
             (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
-            !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) {
+            !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) 
+        {
             
             buffer = (BYTE*)malloc(mbi.RegionSize);
             if(buffer == NULL)
@@ -239,19 +234,17 @@ BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalT
         return FALSE;
     }
 
-    // currentTarget'e point eden pointer'ları ara
     for(i = 0; i < pointerCount; i++) 
     {
         ptrValue = foundPointers[i].pointedValue;
         
-        // Bu pointer currentTarget'e ulaşabiliyor mu?
         diff = (long long)currentTarget - (long long)ptrValue;
         
         if (abs(diff) <= MAX_OFFSET && diff % sizeof(uintptr_t) == 0) 
         {
             chain->offsets[currentDepth] = (uintptr_t)diff; /* add to chain */
 
-            //nextTarget = foundPointers[i].address;  
+            /* nextTarget = foundPointers[i].address;   */
             nextTarget = ptrValue + chain->offsets[currentDepth];
 
             if(BuildChainRecursive(hProc, nextTarget, finalTarget, chain, currentDepth + 1)) 
@@ -362,9 +355,8 @@ BOOL GetModuleInfo(HANDLE hProc, uintptr_t address, char *moduleName, uintptr_t 
     if (pid == 0) return FALSE;
     
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
-    if (hSnap == INVALID_HANDLE_VALUE) {
+    if (hSnap == INVALID_HANDLE_VALUE) 
         return FALSE;
-    }
 
     MODULEENTRY32 me32;
     me32.dwSize = sizeof(MODULEENTRY32);
