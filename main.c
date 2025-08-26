@@ -7,8 +7,7 @@
 #include <stdint.h> /* uintptr_t */
 #include "include/PointerChain.h"
 
-#define MAX_DEPTH 4
-#define MAX_CHAR_SIZE 50
+#define MAX_CHAR_SIZE 64
 
 typedef union
 {
@@ -35,6 +34,7 @@ int main()
 
     Menu();
 
+    CleanupPointerData(); /* set free */
     return 0;
 }
 
@@ -103,7 +103,6 @@ void Menu()
                     chainFile = fopen("chains.txt", "w");
 
                 FindPointerChain(chainFile, hProc, (uintptr_t)targetAddress, chainOffsets, 1);
-                
                 printf("Pointer chains have been written to the file.\n");
                 fclose(chainFile);
                 break;
