@@ -15,7 +15,8 @@
 #define MODULE_NAME_SIZE 64
 
 /* To store pointer information */
-typedef struct {
+typedef struct 
+{
     uintptr_t address;      /* Address of the pointer */
     uintptr_t pointedValue; /* Value the pointer points to (it is also address) */
     uintptr_t offset;       /* Offset from the pointer to the target */
@@ -24,7 +25,8 @@ typedef struct {
 } PointerInfo;
 
 /* To store a valid pointer chain */
-typedef struct {
+typedef struct 
+{
     uintptr_t baseAddress;  /* Starting address (module base + static offset) */
     uintptr_t offsets[MAX_DEPTH]; /* Offsets in the chain */
     int depth;              /* Depth of the chain */

@@ -6,7 +6,7 @@
 #include <math.h> /* [fabs()]: Use fabs to compare floating-point values - epsilon tolerance */
 #include <stdint.h> /* uintptr_t */
 #include "include/PointerChain.h"
-#include "include/MemoryRagion.h"
+#include "include/MemoryRegion.h"
 
 #define MAX_CHAR_SIZE 64
 
@@ -66,7 +66,7 @@ void Menu()
         printf("\n------------------\n");
         printf("Current PID: %lu\n", pid);
         printf("------------------\n");
-        printf("1. Get module base address\n2. Set PID\n3. Scan for value\n4. Find pointer chain\n5. Show memory Regions\nX. Exit\n");
+        printf("1. Get module base address\n2. Set PID\n3. Scan for value\n4. Find pointer chain\n5. List memory regions\n6. Print memory cells\nX. Exit\n");
         printf("Please select an option: ");
         
         scanf(" %c", &choice);
@@ -109,7 +109,11 @@ void Menu()
                 break;
             
             case '5': /* Save memory regions to text file */
-                ShowMemoryRegions(hProc);    
+                ListMemoryRegions(hProc);    
+                break;
+
+            case '6': /* Print memory cells */
+                FindReadableRegions(hProc);
                 break;
 
             case 'X': /* EXIT */
