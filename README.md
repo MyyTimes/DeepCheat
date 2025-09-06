@@ -3,7 +3,7 @@
   
 <a name="english"></a>
 ## 🇬🇧 English Version
-> v.1.0
+> v.1.1
 
 ## Installation and Setup
 ```bash
@@ -16,15 +16,14 @@ gcc main.c PointerChain.c MemoryRegion.c DebugTerminal.c -o deepcheat
 ## Project Structure
 ```
 DeepCheat/
-├── main.c 
-├── MemoryRegion.c
-├── PointerChain.c
-│
+├── src/
+│ ├── main.c 
+│ ├── MemoryRegion.c
+│ ├── PointerChain.c
 ├── include/
 │ ├── MemoryRegion.h
 │ ├── PointerChain.h
 │ ├── DebugTerminal.h
-│
 ├── Pointers/ 
 ├── Outputs/ 
 ├── LICENSE
@@ -33,7 +32,7 @@ DeepCheat/
 
 <a name="turkce"></a>
 ## 🇹🇷 Türkçe Sürüm
-> v.1.0
+> v.1.1
 
 ## Kurulum
 ```bash
@@ -46,15 +45,14 @@ gcc main.c PointerChain.c MemoryRegion.c DebugTerminal.c -o deepcheat
 ## Dosya Yapısı
 ```
 DeepCheat/
-├── main.c 
-├── MemoryRegion.c
-├── PointerChain.c
-│
+├── src/
+│ ├── main.c 
+│ ├── MemoryRegion.c
+│ ├── PointerChain.c
 ├── include/
 │ ├── MemoryRegion.h
 │ ├── PointerChain.h
 │ ├── DebugTerminal.h
-│
 ├── Pointers/ 
 ├── Outputs/ 
 ├── LICENSE
