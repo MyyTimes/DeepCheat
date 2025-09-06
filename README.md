@@ -9,8 +9,8 @@
 ```bash
 git clone https://github.com/MyyTimes/DeepCheat.git
 cd DeepCheat
-gcc main.c PointerChain.c MemoryRegion.c DebugTerminal.c -o deepcheat
-.\deepcheat
+gcc src/*.c -Iinclude -o deepcheat
+./deepcheat
 ```
 
 ## Project Structure
@@ -38,8 +38,8 @@ DeepCheat/
 ```bash
 git clone https://github.com/MyyTimes/DeepCheat.git
 cd DeepCheat
-gcc main.c PointerChain.c MemoryRegion.c DebugTerminal.c -o deepcheat
-.\deepcheat
+gcc src/*.c -Iinclude -o deepcheat
+./deepcheat
 ```
 
 ## Dosya Yapısı
