@@ -84,7 +84,7 @@ void FindReadableRegions(HANDLE hProc)
             if(IsReadable(mbi.Protect))
             {
                 PrintInfo("Region address [%p] is being saved...\n", currentAddress);
-                fprintf(file, "\nRegion address: %p", currentAddress);
+                fprintf(file, "\nRegion address: %p\n", currentAddress);
                 DumpMemoryRegion(file, hProc, currentAddress, mbi.RegionSize);
             }   
 
@@ -101,9 +101,10 @@ void FindReadableRegions(HANDLE hProc)
 
 void DumpMemoryRegion(FILE *file, HANDLE hProc, BYTE *startAddress, SIZE_T regionSize)
 {
-    const SIZE_T rowSize = READ_ROW_SIZE;
-    SIZE_T bytesRead, i;
+    const SIZE_T rowSize = sizeof(uintptr_t);
+    SIZE_T bytesRead, i, j;
     BYTE *buffer;
+    unsigned char c;
 
     buffer = (BYTE*)malloc(regionSize);
                 
@@ -111,25 +112,46 @@ void DumpMemoryRegion(FILE *file, HANDLE hProc, BYTE *startAddress, SIZE_T regio
     {
         if(ReadProcessMemory(hProc, startAddress, buffer, regionSize, &bytesRead) && bytesRead > 0)
         {
-            for(i = 0; i < regionSize; i++)
-            {
-                if(i % rowSize == 0)
+            for(i = 0; i < regionSize; i++) 
+            { 
+                if(i % rowSize == 0) 
                 {
-                    fprintf(file, "\n%p: ", startAddress + i);
+                    if(i != 0)
+                    {
+                        fprintf(file, "| "); 
+                        for(j = 0; j < rowSize; j++)
+                        {   
+                            c = (char)buffer[i - rowSize + j];
+                            if(c >= 32 && c <= 126) /* printable ASCII characters */
+                                fprintf(file, "%c", c);
+                            else
+                                fprintf(file, "."); /* non-printable characters */
+                        }
+                        fprintf(file, " | ");
+                    }
+                    fprintf(file, "\n%p: ", startAddress + i); /* new line */
                 }
 
-                if(i < bytesRead)
-                    fprintf(file, "%02X ", *(buffer + i));
-                else
-                    fprintf(file, "   ");
-
-                if((i % rowSize) == sizeof(uintptr_t) - 1)
-                    fprintf(file, "| ");
+                if(i < bytesRead) 
+                    fprintf(file, "%02X ", *(buffer + i)); 
+                else 
+                    fprintf(file, " "); 
             }
-        }
 
-        free(buffer);
+            /* last line */
+            fprintf(file, "| "); 
+            for(j = 0; j < rowSize; j++)
+            {   
+                c = (char)buffer[i - rowSize + j];
+                if(c >= 32 && c <= 126)
+                    fprintf(file, "%c", c);
+                else
+                    fprintf(file, ".");
+            }
+            fprintf(file, " | ");
+        }
     }
+    free(buffer);
 }
 
 BOOL IsReadable(DWORD protect)

@@ -7,7 +7,7 @@
 #define SMALL_MEMORY_STEP 0x1000 /* scanning memory to show regions */
 #define REGION_FILE_NAME "Outputs/MemoryRegions.txt" /* memory regions info */
 #define DUMP_FILE_NAME "Outputs/DumpMemory.txt" /* scanning memory cells */
-#define READ_ROW_SIZE 16
+/*#define READ_ROW_SIZE 16*/
 
 void ListMemoryRegions(HANDLE); /* show each memory regions (with protect, type, size) */
 const char* TypeToString(DWORD); /* mbi.Type -> str */

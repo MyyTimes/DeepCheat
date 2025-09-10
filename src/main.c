@@ -50,6 +50,8 @@ void Menu()
 
     SetModule(&pid, moduleName);
     hProc = OpenProcessHandle(pid);
+    if(hProc == NULL)
+        return; /* invalid process */
 
     /* Variables to scan memory */
     char type;
@@ -61,7 +63,7 @@ void Menu()
     uintptr_t chainOffsets[MAX_DEPTH] = {0};
 
     char choice = '0';
-    while(choice != 'X')
+    while(choice != 'X' || choice != 'x')
     {        
         printf("\n------------------\n");
         printf("Current PID: %lu\n", pid);
@@ -85,6 +87,9 @@ void Menu()
                 if(hProc != NULL)
                     CloseHandle(hProc);
                 hProc = OpenProcessHandle(pid);
+                if(hProc == NULL)
+                    return; /* invalid process */
+
                 break;
 
             case '3':
@@ -117,6 +122,7 @@ void Menu()
                 break;
 
             case 'X': /* EXIT */
+            case 'x':
                 printf("Exiting DeepCheat...\n");
                 break;
 
