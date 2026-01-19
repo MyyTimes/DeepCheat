@@ -8,7 +8,7 @@
 #include <tlhelp32.h>
 #include <stdint.h>
 
-#define MAX_DEPTH 7
+#define MAX_DEPTH 10
 #define MAX_POINTERS_PER_LEVEL 10000
 #define MAX_OFFSET 0x8000  // Maximum reasonable offset
 #define MAX_CHAINS_TO_SAVE 10000
@@ -40,6 +40,9 @@ BOOL CountStaticPointers(HANDLE); /* PHASE 2 */
 BOOL BuildChainsFromStatic(HANDLE, uintptr_t); /* PHASE 3 */
 BOOL BuildChainRecursive(HANDLE, uintptr_t, uintptr_t, PointerChain*, int);
 BOOL ValidateChain(HANDLE, PointerChain*, uintptr_t); /* PHASE 4 */
+void FindDeepChains(HANDLE, uintptr_t, int); /* PHASE 4 - Deep search */
+BOOL SearchBackwards(HANDLE, uintptr_t, uintptr_t[], int, int, uintptr_t); /* Recursive backward search */
+void SetTargetModule(const char*); /* Set module filter */
 void SaveValidChains(FILE*);
 void CleanupPointerData();
 BOOL GetModuleInfo(HANDLE, uintptr_t, char*, uintptr_t*);

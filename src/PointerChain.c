@@ -7,6 +7,9 @@ static int pointerCount = 0;
 static PointerChain *validChain = NULL;
 static int chainCount = 0;
 
+/* Module filter - if set, only chains from this module will be saved */
+static char targetModule[MODULE_NAME_SIZE] = {0};
+
 void FindPointerChain(FILE *chainFile, HANDLE hProc, uintptr_t targetAddress, uintptr_t offsets[], int depth)
 {
     PrintInfo("Starting pointer chain search for target: 0x%llX\n", (unsigned long long)targetAddress);
@@ -39,26 +42,39 @@ void FindPointerChain(FILE *chainFile, HANDLE hProc, uintptr_t targetAddress, ui
     printf("Phase 2: Finding static base pointers...\n");
     if (!CountStaticPointers(hProc)) 
     {
-        PrintError("Failed to find static pointers.\n");
-        CleanupPointerData();
-        return;
+        printf("No static pointers found in Phase 1, trying deep search...\n");
     }
     
-    /* Phase 3: Create chains from 'static bases' */
+    /* Phase 3: Create chains from 'static bases' (depth-1 chains) */
     printf("Phase 3: Building chains from static bases...\n");
-    if (!BuildChainsFromStatic(hProc, targetAddress)) 
-    {
-        PrintError("Failed to build chains from static bases.\n");
-        CleanupPointerData();
-        return;
-    }
+    BuildChainsFromStatic(hProc, targetAddress);
     
-    /* Phase 4: Validate and save chains */
-    printf("Phase 4: Validating and saving chains...\n");
+    /* Phase 4: Deep chain search - start from target and work backwards */
+    printf("Phase 4: Deep chain search (multi-level)...\n");
+    FindDeepChains(hProc, targetAddress, depth);
+    
+    /* Phase 5: Validate and save chains */
+    printf("Phase 5: Saving chains to file...\n");
     SaveValidChains(chainFile);
     
     printf("\nFound %d valid pointer chains.\n\n", chainCount);
     CleanupPointerData();
+}
+
+/* Set module filter - pass NULL or empty string to disable filtering */
+void SetTargetModule(const char* moduleName)
+{
+    if(moduleName == NULL || moduleName[0] == '\0')
+    {
+        targetModule[0] = '\0';
+        printf("Module filter disabled - all modules will be searched.\n");
+    }
+    else
+    {
+        strncpy(targetModule, moduleName, MODULE_NAME_SIZE - 1);
+        targetModule[MODULE_NAME_SIZE - 1] = '\0';
+        printf("Module filter set: Only chains from '%s' will be saved.\n", targetModule);
+    }
 }
 
 /* PHASE 1 */
@@ -192,21 +208,39 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
         if(moduleBase != 0)
             chain.staticOffset = chain.baseAddress - moduleBase;
         
+        /* Calculate where this static pointer leads to */
         nextTarget = foundPointers[i].pointedValue + foundPointers[i].offset;
-
-        if(BuildChainRecursive(hProc, nextTarget, targetAddress, &chain, 1)) 
+        
+        /* If this static pointer directly points to target, it's a depth-1 chain */
+        if(nextTarget == targetAddress)
         {
+            chain.depth = 1;
             if(ValidateChain(hProc, &chain, targetAddress)) 
             {
                 validChain[chainCount] = chain;
                 chainCount++;
-                PrintInfo("Found valid chain: [%s + 0x%llX]", chain.moduleName, (unsigned long long)chain.staticOffset);
-                for(j = 0; j < chain.depth; j++) 
+                PrintInfo("Found valid chain (depth 1): [%s + 0x%llX] + 0x%llX\n", 
+                    chain.moduleName, (unsigned long long)chain.staticOffset,
+                    (unsigned long long)chain.offsets[0]);
+            }
+        }
+        else
+        {
+            /* Need to find intermediate pointers - search from target back to this pointer's value */
+            if(BuildChainRecursive(hProc, targetAddress, foundPointers[i].pointedValue, &chain, 1)) 
+            {
+                if(ValidateChain(hProc, &chain, targetAddress)) 
                 {
-                    PrintInfo(" + 0x%llX", (unsigned long long)chain.offsets[j]);
-                    if(j < chain.depth - 1) printf(" ->");
+                    validChain[chainCount] = chain;
+                    chainCount++;
+                    PrintInfo("Found valid chain: [%s + 0x%llX]", chain.moduleName, (unsigned long long)chain.staticOffset);
+                    for(j = 0; j < chain.depth; j++) 
+                    {
+                        PrintInfo(" + 0x%llX", (unsigned long long)chain.offsets[j]);
+                        if(j < chain.depth - 1) printf(" ->");
+                    }
+                    printf("\n");
                 }
-                printf("\n");
             }
         }
     }
@@ -214,47 +248,227 @@ BOOL BuildChainsFromStatic(HANDLE hProc, uintptr_t targetAddress)
     return chainCount > 0;
 }
 
-BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t finalTarget, PointerChain* chain, int currentDepth)
+/* PHASE 4: Deep chain search - start from target and search backwards */
+void FindDeepChains(HANDLE hProc, uintptr_t targetAddress, int maxDepth)
 {
-    uintptr_t ptrValue, nextTarget;
-    long long diff;
-    int i;
+    PointerChain chain;
+    uintptr_t offsets[MAX_DEPTH];
+    
+    memset(offsets, 0, sizeof(offsets));
+    memset(&chain, 0, sizeof(chain));
+    
+    printf("Starting deep chain search from target 0x%llX (max depth: %d)...\n", 
+           (unsigned long long)targetAddress, maxDepth);
+    
+    /* Search backwards from target */
+    SearchBackwards(hProc, targetAddress, offsets, 0, maxDepth, targetAddress);
+    
+    printf("Deep search completed. Found %d additional chains.\n", chainCount);
+}
 
-    /* Reached the target */
-    if (currentTarget == finalTarget) 
+/* Recursive backward search for pointer chains */
+BOOL SearchBackwards(HANDLE hProc, uintptr_t currentAddr, uintptr_t offsets[], int currentDepth, int maxDepth, uintptr_t originalTarget)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    BYTE *scanAddress = 0;
+    BYTE *buffer;
+    SIZE_T bytesRead;
+    size_t i;
+    uintptr_t ptrValue, ptrAddress;
+    long long diff;
+    PointerChain chain;
+    DWORD_PTR moduleBase;
+    char moduleName[MODULE_NAME_SIZE];
+    BOOL foundAny = FALSE;
+    int j;
+    
+    if (currentDepth >= maxDepth || currentDepth >= MAX_DEPTH)
+        return FALSE;
+    
+    if (chainCount >= MAX_CHAINS_TO_SAVE)
+        return FALSE;
+    
+    /* Scan entire memory for pointers pointing to currentAddr */
+    while (VirtualQueryEx(hProc, scanAddress, &mbi, sizeof(mbi)) == sizeof(mbi)) 
     {
-        chain->depth = currentDepth;
+        /* Only scan readable regions */
+        if(mbi.State == MEM_COMMIT && 
+            (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
+            !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) 
+        {
+            buffer = (BYTE*)malloc(mbi.RegionSize);
+            if(buffer == NULL)
+            {
+                scanAddress = (BYTE*)mbi.BaseAddress + mbi.RegionSize;
+                continue;
+            }
+            
+            if(ReadProcessMemory(hProc, mbi.BaseAddress, buffer, mbi.RegionSize, &bytesRead)) 
+            {
+                for(i = 0; i + sizeof(uintptr_t) <= bytesRead && chainCount < MAX_CHAINS_TO_SAVE; i += sizeof(uintptr_t)) 
+                {
+                    ptrValue = *(uintptr_t*)(buffer + i);
+                    
+                    /* Skip NULL pointers */
+                    if (ptrValue == 0) continue;
+                    
+                    /* Check if this pointer can reach currentAddr with an offset */
+                    diff = (long long)currentAddr - (long long)ptrValue;
+                    
+                    if(labs(diff) <= MAX_OFFSET) 
+                    {
+                        ptrAddress = (uintptr_t)((BYTE*)mbi.BaseAddress + i);
+                        
+                        /* Store this offset */
+                        offsets[currentDepth] = (uintptr_t)diff;
+                        
+                        /* Check if this pointer is in a static module region */
+                        if(mbi.Type == MEM_IMAGE && GetModuleInfo(hProc, ptrAddress, moduleName, &moduleBase))
+                        {
+                            /* Check module filter - skip if doesn't match target module */
+                            if(targetModule[0] != '\0' && _stricmp(moduleName, targetModule) != 0)
+                            {
+                                /* Module doesn't match filter, continue searching */
+                                if(currentDepth + 1 < maxDepth)
+                                {
+                                    if(SearchBackwards(hProc, ptrAddress, offsets, currentDepth + 1, maxDepth, originalTarget))
+                                    {
+                                        foundAny = TRUE;
+                                    }
+                                }
+                                continue;
+                            }
+                            
+                            /* Found a static base in target module! Build the chain */
+                            memset(&chain, 0, sizeof(chain));
+                            chain.baseAddress = ptrAddress;
+                            strcpy(chain.moduleName, moduleName);
+                            chain.staticOffset = ptrAddress - moduleBase;
+                            chain.depth = currentDepth + 1;
+                            
+                            /* Copy offsets in reverse order (from base to target) */
+                            for(j = 0; j <= currentDepth; j++)
+                            {
+                                chain.offsets[j] = offsets[currentDepth - j];
+                            }
+                            
+                            /* Validate and save */
+                            if(ValidateChain(hProc, &chain, originalTarget))
+                            {
+                                validChain[chainCount] = chain;
+                                chainCount++;
+                                
+                                if(chain.depth > 1)
+                                {
+                                    PrintInfo("Found DEEP chain (depth %d): [%s + 0x%llX]", 
+                                        chain.depth, chain.moduleName, (unsigned long long)chain.staticOffset);
+                                    for(j = 0; j < chain.depth; j++)
+                                    {
+                                        PrintInfo(" + 0x%llX", (unsigned long long)chain.offsets[j]);
+                                    }
+                                    printf("\n");
+                                }
+                                
+                                foundAny = TRUE;
+                            }
+                        }
+                        else if(currentDepth + 1 < maxDepth)
+                        {
+                            /* Not static, continue searching backwards */
+                            if(SearchBackwards(hProc, ptrAddress, offsets, currentDepth + 1, maxDepth, originalTarget))
+                            {
+                                foundAny = TRUE;
+                            }
+                        }
+                    }
+                }
+            }
+            free(buffer);
+        }
+        scanAddress = (BYTE*)mbi.BaseAddress + mbi.RegionSize;
+    }
+    
+    return foundAny;
+}
+
+BOOL BuildChainRecursive(HANDLE hProc, uintptr_t currentTarget, uintptr_t staticPointerValue, PointerChain* chain, int currentDepth)
+{
+    /* 
+     * currentTarget: The address we're trying to reach with a pointer
+     * staticPointerValue: The value that the static base pointer points to
+     * We're searching backwards from target to static pointer's value
+     */
+    
+    /* Check if currentTarget is reachable from staticPointerValue */
+    long long reachDiff = (long long)currentTarget - (long long)staticPointerValue;
+    if(labs(reachDiff) <= MAX_OFFSET && reachDiff % sizeof(uintptr_t) == 0)
+    {
+        /* Found! The static pointer can reach currentTarget directly */
+        chain->offsets[currentDepth] = (uintptr_t)reachDiff;
+        chain->depth = currentDepth + 1;
         return TRUE;
     }
     
     /* Chain length limit */
     if (currentDepth >= MAX_DEPTH) 
     {
-        PrintError("Reached max depth without finding target!\n");
         return FALSE;
     }
 
-    for(i = 0; i < pointerCount; i++) 
+    /* Dynamically scan memory for pointers pointing to currentTarget */
+    MEMORY_BASIC_INFORMATION mbi;
+    BYTE *scanAddress = 0;
+    BYTE *buffer;
+    SIZE_T bytesRead;
+    size_t i;
+    uintptr_t ptrValue, ptrAddress;
+    long long diff;
+
+    while (VirtualQueryEx(hProc, scanAddress, &mbi, sizeof(mbi)) == sizeof(mbi)) 
     {
-        ptrValue = foundPointers[i].pointedValue;
-        
-        diff = (long long)currentTarget - (long long)ptrValue;
-        
-        if (abs(diff) <= MAX_OFFSET && diff % sizeof(uintptr_t) == 0) 
+        /* Readable region - skip module regions to avoid too many results */
+        if(mbi.State == MEM_COMMIT && 
+            (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) &&
+            !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) 
         {
-            chain->offsets[currentDepth] = (uintptr_t)diff; /* add to chain */
-
-            /* nextTarget = foundPointers[i].address;   */
-            nextTarget = ptrValue + chain->offsets[currentDepth];
-
-            if(BuildChainRecursive(hProc, nextTarget, finalTarget, chain, currentDepth + 1)) 
+            buffer = (BYTE*)malloc(mbi.RegionSize);
+            if(buffer == NULL)
             {
-                return TRUE; /* chain found */
+                scanAddress = (BYTE*)mbi.BaseAddress + mbi.RegionSize;
+                continue;
             }
+            
+            if(ReadProcessMemory(hProc, mbi.BaseAddress, buffer, mbi.RegionSize, &bytesRead)) 
+            {
+                for(i = 0; i + sizeof(uintptr_t) <= bytesRead; i += sizeof(uintptr_t)) 
+                {
+                    ptrValue = *(uintptr_t*)(buffer + i);
+                    
+                    /* Check if this pointer points near currentTarget */
+                    diff = (long long)currentTarget - (long long)ptrValue;
+                    
+                    if(labs(diff) <= MAX_OFFSET && diff % sizeof(uintptr_t) == 0 && ptrValue != 0) 
+                    {
+                        ptrAddress = (uintptr_t)((BYTE*)mbi.BaseAddress + i);
+                        
+                        /* Store offset for this level */
+                        chain->offsets[currentDepth] = (uintptr_t)diff;
+                        
+                        /* Recursively search for pointers pointing to this pointer's address */
+                        if(BuildChainRecursive(hProc, ptrAddress, staticPointerValue, chain, currentDepth + 1)) 
+                        {
+                            free(buffer);
+                            return TRUE; /* Chain found */
+                        }
+                    }
+                }
+            }
+            free(buffer);
         }
+        scanAddress = (BYTE*)mbi.BaseAddress + mbi.RegionSize;
     }
 
-    return FALSE; /* chain not found */
+    return FALSE; /* Chain not found at this level */
 }
 
 /* PHASE 4 */
@@ -314,16 +528,14 @@ void SaveValidChains(FILE *chainFile)
         fprintf(chainFile, "Module Base Address: 0x%llX\n", (unsigned long long)(chain->baseAddress - chain->staticOffset));
         fprintf(chainFile, "Chain Base Address: 0x%llX\n", (unsigned long long)chain->baseAddress);
         fprintf(chainFile, "Depth: %d\n", chain->depth);
-        fprintf(chainFile, "Chain: [\"%s\" + 0x%llX]", chain->moduleName, (unsigned long long)chain->staticOffset);
+        fprintf(chainFile, "Chain: [\"%s\" + 0x%llX]\n", chain->moduleName, (unsigned long long)chain->staticOffset);
+        fprintf(chainFile, "Offsets:\n");
         
         for(j = 0; j < chain->depth; j++) 
         {
-            fprintf(chainFile, " + 0x%llX", (unsigned long long)chain->offsets[j]);
-            
-            if (j < chain->depth - 1)
-                fprintf(chainFile, " -> ");
+            fprintf(chainFile, "  [%d] 0x%llX\n", j, (unsigned long long)chain->offsets[j]);
         }
-        fprintf(chainFile, "\n\n");
+        fprintf(chainFile, "\n");
     }
     
     fprintf(chainFile, "Total valid chains found: %d\n", chainCount);

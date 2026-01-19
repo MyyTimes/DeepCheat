@@ -6,7 +6,7 @@ void ListMemoryRegions(HANDLE hProc)
     FILE *file = fopen(REGION_FILE_NAME, "w");
     if(file == NULL)
     {
-        PrintError("FILE ERROR: Regions could not be saved!\n");
+        PrintError("FILE ERROR: Regions could not be saved! Create 'Outputs' folder!\n");
         return;
     }
 

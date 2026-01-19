@@ -104,11 +104,25 @@ void Menu()
                 scanf(" %llx", &targetAddress);
                 ClearBuffer();
 
+                int maxDepth = 0;
+                printf("Enter max chain depth (1-10, recommended: 7): ");
+                scanf(" %d", &maxDepth);
+                ClearBuffer();
+                if(maxDepth < 1) maxDepth = 1;
+                if(maxDepth > MAX_DEPTH) maxDepth = MAX_DEPTH;
+
+                /* Module filter */
+                char filterModule[MAX_CHAR_SIZE] = {0};
+                printf("Enter target module name (e.g. GameAssembly.dll) or press Enter for all: ");
+                fgets(filterModule, MAX_CHAR_SIZE, stdin);
+                filterModule[strcspn(filterModule, "\n")] = '\0';
+                SetTargetModule(filterModule);
+
                 chainFile = OpenChainFile(chainFile);
                 if(chainFile == NULL)
-                    chainFile = fopen("Pointers/chains.txt", "w");
+                    chainFile = fopen("Outputs/chains.txt", "w");
 
-                FindPointerChain(chainFile, hProc, (uintptr_t)targetAddress, chainOffsets, 1);
+                FindPointerChain(chainFile, hProc, (uintptr_t)targetAddress, chainOffsets, maxDepth);
                 printf("Pointer chains have been written to the file.\n");
                 fclose(chainFile);
                 break;
@@ -144,10 +158,10 @@ void ClearBuffer()
 FILE* OpenChainFile(FILE *chainFile) 
 {
     char *fileName = (char*)calloc(MAX_CHAR_SIZE, sizeof(char));
-    strcat(fileName, "Pointers/"); /* folder name */
+    strcat(fileName, "Outputs/"); /* folder name */
 
     printf("Enter chain file name: ");
-    fgets(&fileName[9], MAX_CHAR_SIZE, stdin);
+    fgets(&fileName[8], MAX_CHAR_SIZE, stdin);
 
     fileName[strcspn(fileName, "\n")] = '\0'; /* Remove newline character */
     strcat(fileName, ".txt"); /* file type */
