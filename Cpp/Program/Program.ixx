@@ -19,6 +19,7 @@ public:
     Program& operator=(const Program&) = delete;
 
     bool IsProgramConnected() { return m_isProgramConnected; }
+    HANDLE GetHandle() { return m_hProc; }
 
     bool AttachProcess(DWORD, const std::string&);
     [[nodiscard]] uintptr_t GetBaseAddress() const;
